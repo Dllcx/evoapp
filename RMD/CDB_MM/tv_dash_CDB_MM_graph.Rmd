@@ -1,0 +1,44 @@
+---
+title:
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(highcharter)
+
+setwd('~/R/tsy_DailyReport/DB/')
+db <- src_sqlite("cetip_db.sqlite3", create = FALSE)
+tbl_oc_mercado <- tbl(db,"b3_oc_mercado")
+
+dt_vct <- tbl_oc_mercado %>% distinct(DAT_REGISTRO) %>% filter(DAT_REGISTRO >= '2016-12-02') %>% collect()
+dt_vct2 <- lubridate::ymd(dt_vct[[1]])
+
+plot_vector <- as_tibble(read_rds('plot_vectors.rds'))
+ts_San_Share_cdb <- xts::xts(round(plot_vector$vect_share_cdb2,digits = 2),order.by = dt_vct2)
+ts_delta_cdb <- xts::xts(round(plot_vector$vect_delta_cdb2, digits = 2),order.by = dt_vct2)
+
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### CDB (Market - Market) | Evolução - Share vs Peers (BRL MM)
+
+```{r}
+
+highchart(type="stock") %>% 
+  hc_add_series(ts_San_Share_cdb, name = "Share", color = "red",
+                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "20px"))) %>% 
+  hc_add_series(ts_delta_cdb, type = "column", name = "Delta", color = "gray",
+                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "20px"))) %>% 
+  hc_rangeSelector(selected = 0) %>% 
+  hc_legend(enabled=TRUE, align = "right", verticalAlign = "top", itemStyle= list(fontSize = "15px")) %>% 
+  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>")) %>% 
+  hc_xAxis(labels = list(style = list(fontSize = "15px")))
+
+```

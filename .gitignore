@@ -1,0 +1,9 @@
+/CSV
+/DB
+/www
+/XLSX
+*.html
+.RData
+.Rhistory
+*.Rproj
+*.Rproj.user
