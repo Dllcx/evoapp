@@ -1,2 +1,3 @@
 # evoapp
-App crafted with Shiny and Shiny Dashboard
+App for daily report visualization (Browser and Mobile) 
+Crafted with Shiny and Shiny Dashboard
