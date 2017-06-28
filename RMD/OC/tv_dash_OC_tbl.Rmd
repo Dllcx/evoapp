@@ -14,7 +14,7 @@ library(tidyverse)
 # ANTES DE INICIAR O SERVER RODAR O SOURCE plot_base_vectors_OC.r
 
 # DB SOCKET
-db <- src_sqlite("~/R/tsy_DailyReport/DB/cetip_db.sqlite3", create = FALSE)
+db <- src_sqlite("~/R/evoapp/DB/cetip_db.sqlite3", create = FALSE)
 
 # DB TABLES
 tbl_oc_mercado <- tbl(db,"b3_oc_mercado")

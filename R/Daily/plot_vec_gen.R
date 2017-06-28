@@ -2,7 +2,7 @@ require(tidyverse)
 
 rm(list = ls())
 
-setwd('~/R/tsy_DailyReport/DB/')
+setwd('~/R/evoapp/DB/')
 
 fl <- 'plot_vectors.rds'
 if(file.exists(fl)) file.remove(fl)

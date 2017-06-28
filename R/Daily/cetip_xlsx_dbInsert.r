@@ -5,7 +5,7 @@ require(readxl)
 rm(list = ls())
 
 # Link Data base
-setwd("~/R/tsy_DailyReport/DB/")
+setwd("~/R/evoapp/DB/")
 db <- src_sqlite("cetip_db.sqlite3", create = FALSE)
 
 # DB TABLES
@@ -21,21 +21,21 @@ tbl_CDB_mercado %>% colnames() -> cdb_mkt_names
 tbl_CDB_santander %>% colnames() -> cdb_san_names
 
 # Read OC Mercado/Santander XLSX
-df_mercado_oc <- read_xlsx("~/R/tsy_DailyReport/XLSX/Cetip Market Report Diario (Compromissada) - Consolidado.XLSX")
+df_mercado_oc <- read_xlsx("~/R/evoapp/XLSX/Cetip Market Report Diario (Compromissada) - Consolidado.XLSX")
 df_mercado_oc$DAT_REGISTRO <- as.character(df_mercado_oc$DAT_REGISTRO)
 colnames(df_mercado_oc) <- oc_mkt_names
 
-df_santander_oc <- read_xlsx("~/R/tsy_DailyReport/XLSX/Cetip Market Report Diario (Compromissada) - Santander.XLSX")
+df_santander_oc <- read_xlsx("~/R/evoapp/XLSX/Cetip Market Report Diario (Compromissada) - Santander.XLSX")
 df_santander_oc$DAT_REGISTRO <- as.character(df_santander_oc$DAT_REGISTRO)
 colnames(df_santander_oc) <- oc_san_names
 
 # Read CDB Mercado/Santander XLSX
-df_mercado_cdb <- read_xlsx("~/R/tsy_DailyReport/XLSX/Cetip Market Report Diario (CDB) - Consolidado.xlsx")
+df_mercado_cdb <- read_xlsx("~/R/evoapp/XLSX/Cetip Market Report Diario (CDB) - Consolidado.xlsx")
 df_mercado_cdb$DAT_REGISTRO <- as.character(df_mercado_cdb$DAT_REGISTRO)
 df_mercado_cdb$DESV_PAD <- NULL
 colnames(df_mercado_cdb) <- cdb_mkt_names
 
-df_santander_cdb <- read_xlsx("~/R/tsy_DailyReport/XLSX/Cetip Market Report Diario (CDB) - Santander.xlsx")
+df_santander_cdb <- read_xlsx("~/R/evoapp/XLSX/Cetip Market Report Diario (CDB) - Santander.xlsx")
 df_santander_cdb$DAT_REGISTRO <- as.character(df_santander_cdb$DAT_REGISTRO)
 df_santander_cdb$DESV_PAD <- NULL
 colnames(df_santander_cdb) <- cdb_san_names

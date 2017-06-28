@@ -13,7 +13,7 @@ library(tidyverse)
 
 # ANTES DE INICIAR O SERVER RODAR O SOURCE plot_base_vectors_OC.r
 
-setwd('~/R/tsy_DailyReport/DB/')
+setwd('~/R/evoapp/DB/')
 # DB SOCKET
 db <- src_sqlite("cetip_db.sqlite3", create = FALSE)
 
