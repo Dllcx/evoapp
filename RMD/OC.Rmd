@@ -1,25 +1,25 @@
----
-title: "S&MI"
-output: 
-  flexdashboard::flex_dashboard:
-    theme: simplex
-    orientation: rows
----
 
-```{r setup, include=FALSE}
-library(flexdashboard)
+  
+```{r setup_oc, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
 library(tidyverse)
 library(highcharter)
 
-setwd('~/R/tsy_DailyReport/DB/')
-db <- src_sqlite("cetip_db.sqlite3", create = FALSE)
+# Environment Clean
+rm(list = ls())
+gc()
+
+# DB SOCKET
+
+db <- src_sqlite("~/R/evoapp/DB/cetip_db.sqlite3", create = FALSE)
 tbl_oc_mercado <- tbl(db,"b3_oc_mercado")
 tbl_oc_santander <- tbl(db,"b3_oc_santander")
 
 dt_vct <- tbl_oc_mercado %>% distinct(DAT_REGISTRO) %>% filter(DAT_REGISTRO >= '2016-12-02') %>% collect()
 dt_vct2 <- lubridate::ymd(dt_vct[[1]])
 
-plot_vector <- as_tibble(read_rds('plot_vectors.rds'))
+plot_vector <- as_tibble(read_rds('~/R/evoapp/DB/plot_vectors.rds'))
 ts_San_Share <- xts::xts(round(plot_vector$vect_share_oc, digits = 2),order.by = dt_vct2)
 ts_delta <- xts::xts(round(plot_vector$vect_delta_oc, digits = 2),order.by = dt_vct2)
 
@@ -29,7 +29,7 @@ tbl_oc_mercado %>%
          INDEXADOR == 'DI',
          TIPO_ATIVO == 'Não Leasing',
          PEER == 'Grandes bancos de Varejo',
-         DAT_REGISTRO == '2017-06-21') %>% 
+         DAT_REGISTRO == '2017-06-28') %>% 
   mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO) %>%
   group_by(FAIXA_PRAZO) %>% 
   summarise(soma = sum(VAL_FINANCEIRO), tx = sum(taxa), txMd = sum(taxa)/sum(VAL_FINANCEIRO)/100) %>% collect() -> oc_mercado
@@ -40,7 +40,7 @@ tbl_oc_santander %>%
          INDEXADOR == 'DI',
          TIPO_ATIVO == 'Não Leasing',
          PEER == 'Grandes bancos de Varejo',
-         DAT_REGISTRO == '2017-06-21') %>%
+         DAT_REGISTRO == '2017-06-28') %>%
   mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO) %>%
   group_by(FAIXA_PRAZO) %>% 
   summarise(soma = sum(VAL_FINANCEIRO), tx = sum(taxa), txMd = sum(taxa)/sum(VAL_FINANCEIRO)/100) %>% collect() -> oc_santander
@@ -53,36 +53,30 @@ oc_mercado %>%
   mutate(txmdxsan = ((tx.x - tx.y)/(soma.x-soma.y))/100) %>% 
   mutate(DeltaSan = txMd.y - txmdxsan) %>% 
   collect() -> df_press
+
 ```
 
-Page 1
-===================================== 
+## Daily Report {.tabset .tabset-fade}
 
-Row {data-height=600}
--------------------------------------
+### OC | Evo. - Share vs Peers (BRL MM)
 
-### Chart A
-
-```{r Highcharter OC}
+```{r OC_Highcharter}
 
 highchart(type="stock") %>% 
   hc_add_series(ts_San_Share, name = "Share", color = "red",
-                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "15px"))) %>% 
+                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "20px"))) %>% 
   hc_add_series(ts_delta, type = "column", name = "Delta", color = "gray",
-                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "15px"))) %>% 
+                dataLabels = list(align = "center", enabled = TRUE, style = list(fontSize = "20px"))) %>% 
   hc_rangeSelector(selected = 0) %>% 
   hc_legend(enabled=TRUE, align = "right", verticalAlign = "top", itemStyle= list(fontSize = "15px")) %>% 
-  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>")) %>%
+  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>")) %>% 
   hc_xAxis(labels = list(style = list(fontSize = "15px")))
+
 ```
 
+### Tabela de Volumes
 
-Row 
--------------------------------------
-
-### Chart B
-
-```{r}
+```{r OC_tbl_vol}
 df_press %>% 
   select(VolSantander) %>% 
   sum() -> total_sum_volumeSantander
@@ -93,6 +87,24 @@ df_press %>%
 
 total_share <- (total_sum_volumeSantander / (total_sum_volumeSantander + total_sum_volumexsantander))*100
 
+total_vol <- c('<span style="color:black"><b>Total</b></span>',
+               sprintf("<span style=\"color:black\"><b>$%.2f</b></span>",total_sum_volumeSantander),
+               sprintf("<span style=\"color:black\"><b>$%.2f</b></span>",total_sum_volumexsantander),
+               sprintf("<span style=\"color:black\"><b>%.2f%%</b></span>",total_share))
+
+df_press %>% 
+  select(FAIXA_PRAZO,VolSantander,volXsantander, ShareSantander) %>% 
+  rbind(.,total_vol) %>% 
+  DT::datatable(options = list(dom = 't'), rownames=FALSE, escape = FALSE, colnames = c('Faixa Prazo','Santander','Peer Groups','Share')) %>% 
+  DT::formatCurrency(c('VolSantander','volXsantander')) %>% 
+  DT::formatPercentage('ShareSantander',2) %>% 
+  DT::formatStyle(c('VolSantander','volXsantander', 'ShareSantander'),fontWeight = 'bold')
+```
+
+
+### Tabela de Taxas
+
+```{r OC_tbl_taxas}
 df_press %>% 
   select(soma.y) %>% 
   sum() -> total_volsan
@@ -113,36 +125,16 @@ total_txmd_santander <- total_txvolsan/total_volsan
 total_txmd_xsantander <- (total_txvolmkt - total_txvolsan)/(total_volmkt - total_volsan)
 total_delta_santander <- total_txmd_santander - total_txmd_xsantander
 
-sketch = htmltools::withTags(table(
-  class = 'display',
-  thead(
-    tr(
-      th("Faixa Prazo"),
-      th("Santander"),
-      th("Peer Groups"),
-      th("Share"),
-      th("Santander"),
-      th("Peer Groups"),
-      th("Delta")
-    )
-  ),
-  tfoot(
-    tr(
-      th("Total"),
-      th(sprintf(fmt="$%.2f",total_sum_volumeSantander)),
-      th(sprintf(fmt="$%.2f",total_sum_volumexsantander)),
-      th(sprintf(fmt="%.2f%%",total_share)),
-      th(sprintf(fmt="%.2f%%",total_txmd_santander)),
-      th(sprintf(fmt="%.2f%%",total_txmd_xsantander)),
-      th(sprintf(fmt="%.2f%%",total_delta_santander))
-    )
-  )
-))
+total_tx <- c('<span style="color:black"><b>Total</b></span>',
+              sprintf("<span style=\"color:black\"><b>%.2f%%</b></span>",total_txmd_santander),
+              sprintf("<span style=\"color:black\"><b>%.2f%%</b></span>",total_txmd_xsantander),
+              sprintf("<span style=\"color:black\"><b>%.2f%%</b></span>",total_delta_santander))
 
 df_press %>% 
-  select(FAIXA_PRAZO,VolSantander,volXsantander, ShareSantander,txMd.y,txmdxsan,DeltaSan) %>% 
-  DT::datatable(options = list(dom = 't'), container = sketch, rownames=FALSE, extensions = 'Responsive') %>% 
-  DT::formatCurrency(c('VolSantander','volXsantander')) %>% 
-  DT::formatPercentage(c('ShareSantander','txMd.y','txmdxsan','DeltaSan'),2)
+  select(FAIXA_PRAZO,txMd.y,txmdxsan,DeltaSan) %>% 
+  rbind(.,total_tx) %>% 
+  DT::datatable(options = list(dom = 't'), rownames=FALSE, escape = FALSE, colnames = c('Faixa Prazo','Santander','Peer Groups','Delta')) %>% 
+  DT::formatPercentage(c('txMd.y','txmdxsan','DeltaSan'),2) %>% 
+  DT::formatStyle(c('txMd.y','txmdxsan', 'DeltaSan'),fontWeight = 'bold')
 ```
 
