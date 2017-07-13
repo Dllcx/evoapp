@@ -44,7 +44,7 @@ for(i in 1:nrow(dt_vct)){
   
   df_mercado %>% 
     left_join(df_santander, by='FAIXA_PRAZO') %>% 
-    mutate_each(funs(replace(.,is.na(.),0))) %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
     mutate(volXsantander = (soma.x  - soma.y)/1000000, VolSantander = soma.y/1000000) %>% 
     mutate(ShareSantander = VolSantander / (volXsantander+VolSantander)) %>% 
     mutate(txmdxsan = ((tx.x - tx.y)/(soma.x-soma.y))/100) %>% 
@@ -175,7 +175,7 @@ for(i in 1:nrow(dt_vct)){
   
   df_cdb_mercado2 %>% 
     left_join(df_cdb_santander2, by='FAIXA_PRAZO_AJUSTADO') %>% 
-    mutate_each(funs(replace(.,is.na(.),0))) %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
     mutate(volXsantander = (soma.x  - soma.y), VolSantander = soma.y) %>% 
     mutate(ShareSantander = VolSantander / (volXsantander+VolSantander)) %>% 
     mutate(txmdxsan = ((tx.x - tx.y)/(soma.x-soma.y))/100) %>% 
@@ -282,7 +282,7 @@ for(i in 1:nrow(dt_vct)){
            DETENTOR == "Mercado") %>% collect() -> df_cdb_mercado
   df_cdb_mercado %>% 
     unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
-    filter(DAT_REGISTRO == v1) %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"),DAT_REGISTRO == v1) %>% 
     mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
     group_by(FAIXA_PRAZO_AJUSTADO) %>% 
     summarise(soma = sum(VAL_FINANCEIRO_TOTAL), tx = sum(taxa), txmd = sum(taxa)/sum(VAL_FINANCEIRO_TOTAL)/100) -> df_cdb_mercado2
@@ -294,14 +294,14 @@ for(i in 1:nrow(dt_vct)){
            DETENTOR == "Mercado") %>% collect() -> df_cdb_santander
   df_cdb_santander %>% 
     unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
-    filter(DAT_REGISTRO == v1) %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"), DAT_REGISTRO == v1) %>% 
     mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
     group_by(FAIXA_PRAZO_AJUSTADO) %>% 
     summarise(soma = sum(VAL_FINANCEIRO_TOTAL), tx = sum(taxa), txmd = sum(taxa)/sum(VAL_FINANCEIRO_TOTAL)/100) -> df_cdb_santander2
   
   df_cdb_mercado2 %>% 
     left_join(df_cdb_santander2, by='FAIXA_PRAZO_AJUSTADO') %>% 
-    mutate_each(funs(replace(.,is.na(.),0))) %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
     mutate(volXsantander = (soma.x  - soma.y), VolSantander = soma.y) %>% 
     mutate(ShareSantander = VolSantander / (volXsantander+VolSantander)) %>% 
     mutate(txmdxsan = ((tx.x - tx.y)/(soma.x-soma.y))/100) %>% 

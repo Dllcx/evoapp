@@ -5,8 +5,7 @@ require(readxl)
 rm(list = ls())
 
 # Link Data base
-setwd("~/R/evoapp/DB/")
-db <- src_sqlite("cetip_db.sqlite3", create = FALSE)
+db <- src_sqlite("~/R/evoapp/DB/cetip_db.sqlite3", create = FALSE)
 
 # DB TABLES
 tbl_oc_mercado <- tbl(db,"b3_oc_mercado")

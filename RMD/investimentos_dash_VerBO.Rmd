@@ -1,0 +1,530 @@
+---
+title: "Investimentos Dashboard"
+type: inverse
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    theme: simplex
+    includes:
+      after_body: footer.html
+    navbar:
+      - { icon: "glyphicon glyphicon-info-sign", href: "#info", align: right }
+---
+
+```{r setup, include=FALSE}
+require(tidyverse)
+require(highcharter)
+require(flexdashboard)
+
+# Define day function
+day <- "2017-07-11"
+
+# DB SOCKET
+db <- src_sqlite("~/R/evoapp/DB/cetip_db.sqlite3", create = FALSE)
+
+# DB TABLES
+tbl_CDB_mercado   <- tbl(db,"b3_CDB_mercado")
+tbl_CDB_santander <- tbl(db,"b3_CDB_santander")
+tbl_oc_mercado    <- tbl(db,"b3_oc_mercado")
+tbl_oc_santander  <- tbl(db,"b3_oc_santander")
+tbl_bo_santander  <- tbl(db,"bo_daily")
+
+# Dates Vector
+dt_vct  <- tbl_oc_mercado %>% distinct(DAT_REGISTRO) %>% filter(DAT_REGISTRO >= '2017-05-02') %>% collect()
+dt_vct2 <- lubridate::ymd(dt_vct[[1]])
+
+# ---- TS Vectors ----
+plot_vector       <- as_tibble(read_rds('~/R/evoapp/DB/plot_vectors_.rds'))
+ts_San_Share      <- xts::xts(round(plot_vector$vect_share_oc, digits = 2),order.by = dt_vct2)
+ts_delta          <- xts::xts(round(plot_vector$vect_delta_oc, digits = 2),order.by = dt_vct2)
+ts_San_Share_cdb  <- xts::xts(round(plot_vector$vect_share_cdb,digits = 2),order.by = dt_vct2)
+ts_delta_cdb      <- xts::xts(round(plot_vector$vect_delta_cdb, digits = 2),order.by = dt_vct2)
+ts_San_Share_cdb2 <- xts::xts(round(plot_vector$vect_share_cdb2,digits = 2),order.by = dt_vct2)
+ts_delta_cdb2     <- xts::xts(round(plot_vector$vect_delta_cdb2, digits = 2),order.by = dt_vct2)
+
+# ---- Functions calls ----
+oc_press_terc <- function(day,tbl_mercado, tbl_santander){
+  tbl_mercado %>% 
+    filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           ATIVO == 'DEB',
+           INDEXADOR == 'DI',
+           TIPO_ATIVO == 'Não Leasing',
+           PEER == 'Grandes bancos de Varejo',
+           DAT_REGISTRO == day) %>%
+    mutate(VOl_Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+    group_by(FAIXA_PRAZO) %>% 
+    summarise(VAL_FINANCEIRO, VOl_Tx) %>% collect() -> tbl_oc_1 
+  
+  tbl_santander %>% 
+    filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           ATIVO == 'DEB',
+           INDEXADOR == 'DI',
+           TIPO_ATIVO == 'Não Leasing',
+           PEER == 'Grandes bancos de Varejo',
+           DAT_REGISTRO == day) %>%
+    mutate(VOl_Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+    group_by(FAIXA_PRAZO) %>% 
+    summarise(VAL_FINANCEIRO, VOl_Tx) %>% collect() -> tbl_oc_2
+  
+  tbl_oc_1 %>% 
+    full_join(tbl_oc_2, by="FAIXA_PRAZO") %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
+    mutate(VOL = VAL_FINANCEIRO.x - VAL_FINANCEIRO.y, Tx = VOl_Tx.x - VOl_Tx.y) %>% 
+    select(FAIXA_PRAZO,VOL, Tx) -> oc_press
+  return(oc_press)
+}
+oc_press_prop <- function(day,tbl_mercado){
+  tbl_mercado %>% 
+    filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           ATIVO == 'DEB',
+           INDEXADOR == 'DI',
+           TIPO_ATIVO == 'Leasing',
+           PEER == 'Grandes bancos de Varejo',
+           DAT_REGISTRO == day) %>%
+    mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+    group_by(FAIXA_PRAZO) %>% 
+    summarise(VOL, Tx) %>% 
+    collect() -> tbl_oc_1 
+  
+  return(tbl_oc_1)
+}
+cdb_press_mc <- function(day,tbl_mercado, tbl_santander){
+  tbl_mercado %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           TICKET_AJUSTADO %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           EMISSOR == "Mercado",
+           DETENTOR == "Cliente") %>% 
+    collect() %>% 
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"),
+           DAT_REGISTRO == day) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(VOL_FIN = sum(VAL_FINANCEIRO_TOTAL), Tx_Mkt = sum(taxa)) -> tbl_cdb_1
+  
+  tbl_santander %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           TICKET_AJUSTADO %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           EMISSOR == "Mercado",
+           DETENTOR == "Cliente") %>% 
+    collect() %>%
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"),
+           DAT_REGISTRO == day) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(VOL_FIN = sum(VAL_FINANCEIRO_TOTAL), Tx_San = sum(taxa)) -> tbl_cdb_2
+  
+  tbl_cdb_1 %>% 
+    full_join(tbl_cdb_2, by='FAIXA_PRAZO_AJUSTADO') %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
+    mutate(VOL = VOL_FIN.x - VOL_FIN.y, Tx = Tx_Mkt - Tx_San) %>% 
+    select(FAIXA_PRAZO_AJUSTADO, VOL, Tx) -> cdb_press
+  
+  return(cdb_press)
+}
+cdb_press_mm <- function(day, tbl_mercado, tbl_santander){
+  tbl_mercado %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           EMISSOR == "Mercado",
+           DETENTOR == "Mercado") %>% 
+    collect() %>%
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"),
+           DAT_REGISTRO == day) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(Vol_mkt = sum(VAL_FINANCEIRO_TOTAL), Tx_mkt = sum(taxa)) -> cdb_mercado_m2
+  
+  tbl_santander %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           EMISSOR == "Mercado",
+           DETENTOR == "Mercado") %>% 
+    collect() %>% 
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM"),
+           DAT_REGISTRO == day) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(Vol_san = sum(VAL_FINANCEIRO_TOTAL), Tx_san = sum(taxa)) -> cdb_santander_m2
+  
+  cdb_mercado_m2 %>% 
+    full_join(cdb_santander_m2, by='FAIXA_PRAZO_AJUSTADO') %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
+    mutate(VOL = Vol_mkt - Vol_san, Tx = Tx_mkt - Tx_san) %>% 
+    select(FAIXA_PRAZO_AJUSTADO, VOL, Tx) -> cdb_press
+  
+  return(cdb_press)
+}
+oc_bo <- function(day,bo_santander){
+  bo_santander %>% 
+    filter(DT_CONT == day,
+           DESC_SUB_PROD == "COMPROMISSADA DI") %>% 
+    mutate(Tx = VOL * Per_index) %>% 
+    group_by(FAIXA_PRAZO) %>% 
+    summarise(VOL = sum(VOL), Tx = sum(Tx)) %>% 
+    collect() -> bo_san
+  return(bo_san)
+}
+cdb_mktCli_bo <- function(day, bo_santander){
+  bo_santander %>% 
+    filter(DT_CONT == day,
+           DESC_SUB_PROD %in% c("CDB DI", "CDB DI CORPORATE"),
+           INST == "Cliente") %>% 
+    mutate(FAIXA_PRAZO_AJUSTADO = FAIXA_PRAZO, Tx = VOL * Per_index) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(VOL = sum(VOL), Tx = sum(Tx)) %>% 
+    collect() -> bo_san
+  return(bo_san)
+}
+cdb_mktMkt_bo <- function(day, bo_santander){
+  bo_santander %>% 
+    filter(DT_CONT == day,
+           DESC_SUB_PROD %in% c("CDB DI", "CDB DI CORPORATE"),
+           INST == "Institucionais") %>% 
+    mutate(FAIXA_PRAZO_AJUSTADO = FAIXA_PRAZO, Tx = VOL * Per_index) %>% 
+    group_by(FAIXA_PRAZO_AJUSTADO) %>% 
+    summarise(VOL = sum(VOL), Tx = sum(Tx)) %>% 
+    collect() -> bo_san
+  return(bo_san)
+}
+
+# ---- Create Mkt Tables ----
+oc_mkt_terc <-  oc_press_terc(day,tbl_oc_mercado,tbl_oc_santander)
+oc_mkt_prop <-  oc_press_prop(day,tbl_oc_mercado)
+cdb_mktCli  <-  cdb_press_mc(day, tbl_CDB_mercado, tbl_CDB_santander)
+cdb_mktmkt  <-  cdb_press_mm(day, tbl_CDB_mercado, tbl_CDB_santander)
+
+# ---- Create BO-San Tables ----
+oc_bo_san         <-  oc_bo(day, tbl_bo_santander)
+cdb_bo_san_mktCli <-  cdb_mktCli_bo(day, tbl_bo_santander)
+cdb_bo_san_mktmkt <-  cdb_mktMkt_bo(day, tbl_bo_santander)
+
+# ---- Press Tables ----
+oc_mkt_terc %>% 
+  full_join(oc_bo_san,by="FAIXA_PRAZO") %>% 
+  mutate_all(funs(replace(.,is.na(.),0))) -> tbl_press
+cdb_mktCli %>% 
+  full_join(cdb_bo_san_mktCli,by="FAIXA_PRAZO_AJUSTADO") %>% 
+  mutate_all(funs(replace(.,is.na(.),0))) -> tbl_press_cdb_mktcli
+cdb_mktmkt %>% 
+  full_join(cdb_bo_san_mktmkt,by="FAIXA_PRAZO_AJUSTADO") %>% 
+  mutate_all(funs(replace(.,is.na(.),0))) -> tbl_press_cdb_mktmkt
+```
+
+Home {data-icon="glyphicon glyphicon-home"}
+=====================================
+
+############################################################
+####### Trabalhar as estatisticas e share de mercado #######
+############################################################
+
+OC Lastro Terceiros {data-navmenu="OC"}
+=====================================  
+
+Row {data-height=750}
+-----------------------------------------------------------------------
+
+### OC | Evo. - Share vs Peers (BRL MM)
+
+```{r OC_Highcharter}
+highchart(type="stock") %>% 
+  hc_add_series(ts_San_Share, name = "Share", color = "red") %>% 
+  hc_add_series(ts_delta, type = "column", name = "Delta", color = "gray") %>% 
+  hc_rangeSelector(selected = 0) %>% 
+  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Tabela de Volumes
+
+```{r OC_tbl_vol}
+tbl_press %>% 
+  select(VOL.y) %>% 
+  sum() -> total_sum_volumeSantander
+
+tbl_press %>% 
+  select(VOL.x) %>% 
+  sum() -> total_sum_volumexsantander
+
+total_share <- (total_sum_volumeSantander / (total_sum_volumeSantander + total_sum_volumexsantander))
+
+total_vol <- list('Total', total_sum_volumeSantander/1000000, total_sum_volumexsantander/1000000, total_share)
+
+tbl_press %>% 
+  select(FAIXA_PRAZO,VOL.y,VOL.x) %>%
+  mutate(VOL.y = VOL.y/1000000, VOL.x = VOL.x/1000000, Share = VOL.y/(VOL.x + VOL.y)) %>% 
+  rbind(.,total_vol) %>% 
+  DT::datatable(options = list(dom = 't', paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Share')) %>% 
+  DT::formatCurrency(c('VOL.y','VOL.x')) %>% 
+  DT::formatPercentage('Share',2) %>% 
+  DT::formatStyle(c('VOL.y','VOL.x', 'Share'),fontWeight = 'bold')
+```
+
+### Tabela de Taxas
+
+```{r OC_tbl_taxas}
+tbl_press %>% 
+  select(VOL.y) %>% 
+  sum() -> total_volsan
+
+tbl_press %>% 
+  select(Tx.y) %>% 
+  sum() -> total_txvolsan
+
+tbl_press %>% 
+  select(Tx.x) %>% 
+  sum() -> total_txvolmkt
+
+tbl_press %>% 
+  select(VOL.x) %>% 
+  sum() -> total_volmkt
+
+total_txmd_santander <- (total_txvolsan / total_volsan)/100
+total_txmd_xsantander <- (total_txvolmkt / total_volmkt)/100
+total_delta_santander <- total_txmd_santander - total_txmd_xsantander
+
+total_tx <- list('Total', total_txmd_santander, total_txmd_xsantander, total_delta_santander)
+
+tbl_press %>% 
+  mutate(Tx_med_SAN = (Tx.y/VOL.y)/100, Tx_med_mkt = (Tx.x/VOL.x)/100) %>% 
+  mutate(DeltaSan = Tx_med_SAN - Tx_med_mkt) %>% 
+  select(FAIXA_PRAZO,Tx_med_SAN,Tx_med_mkt,DeltaSan) %>% 
+  rbind(.,total_tx) %>% 
+  DT::datatable(options = list(dom = 't',paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Delta')) %>% 
+  DT::formatPercentage(c('Tx_med_SAN','Tx_med_mkt','DeltaSan'),2) %>% 
+  DT::formatStyle(c('Tx_med_SAN','Tx_med_mkt', 'DeltaSan'),fontWeight = 'bold')
+```
+
+OC Lastro Próprio {data-navmenu="OC"}
+=====================================  
+
+Row {data-height=750}
+-----------------------------------------------------------------------
+
+### OC (Lastro Próprio) | Market (BRL MM)
+```{r OCLatroProp_Highcharter}
+tbl_oc_mercado %>% 
+filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+       ATIVO == 'DEB',
+       INDEXADOR == 'DI',
+       TIPO_ATIVO == 'Leasing',
+       PEER == 'Grandes bancos de Varejo') %>%
+  mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+  group_by(DAT_REGISTRO) %>% 
+  summarise(VOL = sum(VOL)/1000000, Tx = sum(Tx)/sum(VOL)) %>% 
+  collect() -> mkt_oc_plot
+
+ts_mkt_vol <- xts::xts(round(mkt_oc_plot$VOL, digits = 2),order.by = lubridate::ymd(mkt_oc_plot$DAT_REGISTRO))
+ts_mkt_tx <- xts::xts(round(mkt_oc_plot$Tx, digits = 2),order.by = lubridate::ymd(mkt_oc_plot$DAT_REGISTRO))
+
+highchart(type="stock") %>% 
+  hc_yAxis_multiples(create_yaxis(2,height = c(1,1))) %>% 
+  hc_add_series(ts_mkt_tx, yAxis = 0, name = "Taxa", color = "red", tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_mkt_vol, yAxis = 1, type = "column", name = "Delta", color = 'gray') %>% 
+  hc_rangeSelector(selected = 0)
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Tabela de Volumes
+
+```{r OCLastroProp_tbl_vol}
+mkt_sum <- oc_mkt_prop %>% select(VOL) %>% sum()
+total_vol <- list('Total', NaN, mkt_sum/1000000, 1.0)
+
+oc_mkt_prop %>% 
+  mutate(VOL.y = NaN, VOL.x = VOL/1000000, Share = 1.0) %>% 
+  select(FAIXA_PRAZO, VOL.y, VOL.x, Share) %>% 
+  rbind(.,total_vol) %>% 
+  DT::datatable(options = list(dom = 't', paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Share')) %>% 
+  DT::formatCurrency(c('VOL.y','VOL.x')) %>% 
+  DT::formatPercentage('Share',2) %>% 
+  DT::formatStyle(c('VOL.y','VOL.x', 'Share'),fontWeight = 'bold')
+```
+
+### Tabela de Taxas
+
+```{r OCLastroProp_tbl_taxas}
+mkt_tx <- (oc_mkt_prop %>% select(Tx) %>% sum())/(oc_mkt_prop %>% select(VOL) %>% sum())
+total_tx <- list('Total', NaN, mkt_tx/100, -1.0)
+
+oc_mkt_prop %>% 
+  mutate(Tx_med_SAN = NaN, Tx_med_mkt = (Tx/VOL)/100, DeltaSan = -1.0) %>% 
+  select(FAIXA_PRAZO,Tx_med_SAN,Tx_med_mkt,DeltaSan) %>% 
+  rbind(.,total_tx) %>% 
+  DT::datatable(options = list(dom = 't',paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Delta')) %>% 
+  DT::formatPercentage(c('Tx_med_SAN','Tx_med_mkt','DeltaSan'),2) %>% 
+  DT::formatStyle(c('Tx_med_SAN','Tx_med_mkt', 'DeltaSan'),fontWeight = 'bold')
+```
+
+CDB Mercado-Cliente {data-navmenu="CDB"}
+=====================================
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### CDB (Market - Client) | Share vs Peers (BRL MM)
+
+```{r CBDMC_Highcharter}
+highchart(type="stock") %>% 
+  hc_add_series(ts_San_Share_cdb, name = "Share", color = "red") %>% 
+  hc_add_series(ts_delta_cdb, type = "column", name = "Delta", color = "gray") %>% 
+  hc_rangeSelector(selected = 0) %>% 
+  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Tabela de Volumes
+
+```{r CDB_MC_tbl_vol}
+tbl_press_cdb_mktcli %>% 
+  select(VOL.y) %>% 
+  sum() -> total_sum_volumeSantander
+
+tbl_press_cdb_mktcli %>% 
+  select(VOL.x) %>% 
+  sum() -> total_sum_volumexsantander
+
+total_share <- (total_sum_volumeSantander / (total_sum_volumeSantander + total_sum_volumexsantander))
+
+total_vol <- list('Total', total_sum_volumeSantander/1000000, total_sum_volumexsantander/1000000, total_share)
+
+tbl_press_cdb_mktcli %>% 
+  select(FAIXA_PRAZO_AJUSTADO,VOL.y,VOL.x) %>%
+  mutate(VOL.y = VOL.y/1000000, VOL.x = VOL.x/1000000, Share = VOL.y/(VOL.x + VOL.y)) %>% 
+  rbind(.,total_vol) %>% 
+  DT::datatable(options = list(dom = 't', paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Share')) %>% 
+  DT::formatCurrency(c('VOL.y','VOL.x')) %>% 
+  DT::formatPercentage('Share',2) %>% 
+  DT::formatStyle(c('VOL.y','VOL.x', 'Share'),fontWeight = 'bold')
+```
+
+### Tabela de Taxas
+
+```{r CDB_MC_tbl_taxa}
+tbl_press_cdb_mktcli %>% 
+  select(VOL.y) %>% 
+  sum() -> total_volsan
+
+tbl_press_cdb_mktcli %>% 
+  select(Tx.y) %>% 
+  sum() -> total_txvolsan
+
+tbl_press_cdb_mktcli %>% 
+  select(Tx.x) %>% 
+  sum() -> total_txvolmkt
+
+tbl_press_cdb_mktcli %>% 
+  select(VOL.x) %>% 
+  sum() -> total_volmkt
+
+total_txmd_santander <- (total_txvolsan / total_volsan)/100
+total_txmd_xsantander <- (total_txvolmkt / total_volmkt)/100
+total_delta_santander <- total_txmd_santander - total_txmd_xsantander
+
+total_tx <- list('Total', total_txmd_santander, total_txmd_xsantander, total_delta_santander)
+
+tbl_press_cdb_mktcli %>% 
+  mutate(Tx_med_SAN = (Tx.y/VOL.y)/100, Tx_med_mkt = (Tx.x/VOL.x)/100) %>% 
+  mutate(DeltaSan = Tx_med_SAN - Tx_med_mkt) %>% 
+  select(FAIXA_PRAZO_AJUSTADO,Tx_med_SAN,Tx_med_mkt,DeltaSan) %>% 
+  rbind(.,total_tx) %>% 
+  DT::datatable(options = list(dom = 't',paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Delta')) %>% 
+  DT::formatPercentage(c('Tx_med_SAN','Tx_med_mkt','DeltaSan'),2) %>% 
+  DT::formatStyle(c('Tx_med_SAN','Tx_med_mkt', 'DeltaSan'),fontWeight = 'bold')
+```
+
+CDB Mercado-Mercado {data-navmenu="CDB"}
+=====================================
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### CDB (Market - Client) | Share vs Peers (BRL MM)
+
+```{r CDBMM_Highcharter}
+highchart(type="stock") %>% 
+  hc_add_series(ts_San_Share_cdb2, name = "Share", color = "red") %>% 
+  hc_add_series(ts_delta_cdb2, type = "column", name = "Delta", color = "gray") %>% 
+  hc_rangeSelector(selected = 0) %>% 
+  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Tabela de Volumes
+
+```{r CDB_MM_tbl_vol}
+tbl_press_cdb_mktmkt %>% 
+  select(VOL.y) %>% 
+  sum() -> total_sum_volumeSantander
+
+tbl_press_cdb_mktmkt %>% 
+  select(VOL.x) %>% 
+  sum() -> total_sum_volumexsantander
+
+total_share <- (total_sum_volumeSantander / (total_sum_volumeSantander + total_sum_volumexsantander))
+
+total_vol <- list('Total', total_sum_volumeSantander/1000000, total_sum_volumexsantander/1000000, total_share)
+
+tbl_press_cdb_mktmkt %>% 
+  select(FAIXA_PRAZO_AJUSTADO,VOL.y,VOL.x) %>%
+  mutate(VOL.y = VOL.y/1000000, VOL.x = VOL.x/1000000, Share = VOL.y/(VOL.x + VOL.y)) %>% 
+  rbind(.,total_vol) %>% 
+  DT::datatable(options = list(dom = 't', paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Share')) %>% 
+  DT::formatCurrency(c('VOL.y','VOL.x')) %>% 
+  DT::formatPercentage('Share',2) %>% 
+  DT::formatStyle(c('VOL.y','VOL.x', 'Share'),fontWeight = 'bold')
+```
+
+### Tabela de Taxas
+
+```{r CDB_MM_tbl_taxas}
+tbl_press_cdb_mktmkt %>% 
+  select(VOL.y) %>% 
+  sum() -> total_volsan
+
+tbl_press_cdb_mktmkt %>% 
+  select(Tx.y) %>% 
+  sum() -> total_txvolsan
+
+tbl_press_cdb_mktmkt %>% 
+  select(Tx.x) %>% 
+  sum() -> total_txvolmkt
+
+tbl_press_cdb_mktmkt %>% 
+  select(VOL.x) %>% 
+  sum() -> total_volmkt
+
+total_txmd_santander <- (total_txvolsan / total_volsan)/100
+total_txmd_xsantander <- (total_txvolmkt / total_volmkt)/100
+total_delta_santander <- total_txmd_santander - total_txmd_xsantander
+
+total_tx <- list('Total', total_txmd_santander, total_txmd_xsantander, total_delta_santander)
+
+tbl_press_cdb_mktmkt %>% 
+  mutate(Tx_med_SAN = (Tx.y/VOL.y)/100, Tx_med_mkt = (Tx.x/VOL.x)/100) %>% 
+  mutate(DeltaSan = Tx_med_SAN - Tx_med_mkt) %>% 
+  select(FAIXA_PRAZO_AJUSTADO,Tx_med_SAN,Tx_med_mkt,DeltaSan) %>% 
+  rbind(.,total_tx) %>% 
+  DT::datatable(options = list(dom = 't',paging = FALSE, order = list(list(0,'asc'))), rownames=FALSE, escape = TRUE, colnames = c('Faixa Prazo','Santander','Peer Groups','Delta')) %>% 
+  DT::formatPercentage(c('Tx_med_SAN','Tx_med_mkt','DeltaSan'),2) %>% 
+  DT::formatStyle(c('Tx_med_SAN','Tx_med_mkt', 'DeltaSan'),fontWeight = 'bold')
+```
+
+info {.hidden}
+=====================================
+
+Developer - t684098
+Tsy.Evo - v1.0
