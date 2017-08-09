@@ -1,23 +1,24 @@
 ---
-title: "Investimentos Dashboard"
+title: "Investimentos"
 type: inverse
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     theme: simplex
-    includes:
-      after_body: footer.html
     navbar:
+      - { title: "Data Base: 08/08/2017", align: right}
       - { icon: "glyphicon glyphicon-info-sign", href: "#info", align: right }
+      
 ---
 
 ```{r setup, include=FALSE}
 require(tidyverse)
 require(highcharter)
+require(dygraphs)
 require(flexdashboard)
 
 # Define day function
-day <- "2017-07-11"
+day <- "2017-08-08"
 
 # DB SOCKET
 db <- src_sqlite("~/R/evoapp/DB/cetip_db.sqlite3", create = FALSE)
@@ -39,8 +40,8 @@ ts_San_Share      <- xts::xts(round(plot_vector$vect_share_oc, digits = 2),order
 ts_delta          <- xts::xts(round(plot_vector$vect_delta_oc, digits = 2),order.by = dt_vct2)
 ts_San_Share_cdb  <- xts::xts(round(plot_vector$vect_share_cdb,digits = 2),order.by = dt_vct2)
 ts_delta_cdb      <- xts::xts(round(plot_vector$vect_delta_cdb, digits = 2),order.by = dt_vct2)
-ts_San_Share_cdb2 <- xts::xts(round(plot_vector$vect_share_cdb2,digits = 2),order.by = dt_vct2)
-ts_delta_cdb2     <- xts::xts(round(plot_vector$vect_delta_cdb2, digits = 2),order.by = dt_vct2)
+#ts_San_Share_cdb2 <- xts::xts(round(plot_vector$vect_share_cdb2,digits = 2),order.by = dt_vct2)
+#ts_delta_cdb2     <- xts::xts(round(plot_vector$vect_delta_cdb2, digits = 2),order.by = dt_vct2)
 
 # ---- Functions calls ----
 oc_press_terc <- function(day,tbl_mercado, tbl_santander){
@@ -53,7 +54,7 @@ oc_press_terc <- function(day,tbl_mercado, tbl_santander){
            DAT_REGISTRO == day) %>%
     mutate(VOl_Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
     group_by(FAIXA_PRAZO) %>% 
-    summarise(VAL_FINANCEIRO, VOl_Tx) %>% collect() -> tbl_oc_1 
+    summarise(VAL = sum(VAL_FINANCEIRO), VOl_Tx_ = sum(VOl_Tx)) %>% collect() -> tbl_oc_1 
   
   tbl_santander %>% 
     filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
@@ -64,12 +65,12 @@ oc_press_terc <- function(day,tbl_mercado, tbl_santander){
            DAT_REGISTRO == day) %>%
     mutate(VOl_Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
     group_by(FAIXA_PRAZO) %>% 
-    summarise(VAL_FINANCEIRO, VOl_Tx) %>% collect() -> tbl_oc_2
+    summarise(VAL = sum(VAL_FINANCEIRO), VOl_Tx_ = sum(VOl_Tx)) %>% collect() -> tbl_oc_2
   
   tbl_oc_1 %>% 
     full_join(tbl_oc_2, by="FAIXA_PRAZO") %>% 
     mutate_all(funs(replace(.,is.na(.),0))) %>% 
-    mutate(VOL = VAL_FINANCEIRO.x - VAL_FINANCEIRO.y, Tx = VOl_Tx.x - VOl_Tx.y) %>% 
+    mutate(VOL = VAL.x - VAL.y, Tx = VOl_Tx_.x - VOl_Tx_.y) %>% 
     select(FAIXA_PRAZO,VOL, Tx) -> oc_press
   return(oc_press)
 }
@@ -83,7 +84,7 @@ oc_press_prop <- function(day,tbl_mercado){
            DAT_REGISTRO == day) %>%
     mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
     group_by(FAIXA_PRAZO) %>% 
-    summarise(VOL, Tx) %>% 
+    summarise(VOL = sum(VOL), Tx = sum(Tx)) %>% 
     collect() -> tbl_oc_1 
   
   return(tbl_oc_1)
@@ -192,6 +193,155 @@ cdb_mktMkt_bo <- function(day, bo_santander){
     collect() -> bo_san
   return(bo_san)
 }
+share_san <- function(tbl_mercado_cdb,tbl_santander_cdb,tbl_mercado_oc,tbl_santander_oc,bo_santander){
+  tbl_mercado_cdb %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           TICKET_AJUSTADO %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           EMISSOR == "Mercado",
+           DETENTOR == "Cliente",
+           DAT_REGISTRO >= '2017-05-02') %>% 
+    collect() %>% 
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM")) %>%
+    group_by(DAT_REGISTRO) %>% 
+    summarise(VOL_FIN = sum(VAL_FINANCEIRO_TOTAL)) -> full_mkt
+  
+  tbl_santander_cdb %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           TICKET_AJUSTADO %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           EMISSOR == "Mercado",
+           DETENTOR == "Cliente",
+           DAT_REGISTRO >= '2017-05-02') %>% 
+    collect() %>%
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM")) %>% 
+    group_by(DAT_REGISTRO) %>% 
+    summarise(VOL_FIN = sum(VAL_FINANCEIRO_TOTAL)) -> cdb_san
+  
+  full_mkt %>% 
+    full_join(cdb_san, by='DAT_REGISTRO') %>% 
+    mutate(VOL_CDB = VOL_FIN.x - VOL_FIN.y) %>% 
+    select(DAT_REGISTRO,VOL_CDB) %>% 
+    collect() -> cdb_mkt
+  
+  tbl_mercado_oc %>% 
+    filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           ATIVO == 'DEB',
+           INDEXADOR == 'DI',
+           TIPO_ATIVO == 'Leasing',
+           PEER == 'Grandes bancos de Varejo',
+           DAT_REGISTRO >= '2017-05-02') %>%
+    mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+    group_by(DAT_REGISTRO) %>% 
+    summarise(VOL_OC = sum(VOL)) %>% 
+    collect() -> full_oc_prop_mkt
+  
+  tbl_santander_oc %>% 
+    filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) De 50 a 100 milhões","(K) Mais de 100 milhões"),
+           ATIVO == 'DEB',
+           INDEXADOR == 'DI',
+           TIPO_ATIVO == 'Leasing',
+           PEER == 'Grandes bancos de Varejo',
+           DAT_REGISTRO >= '2017-05-02') %>%
+    mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
+    group_by(DAT_REGISTRO) %>% 
+    summarise(VOL_OC = sum(VOL)) %>% 
+    collect() -> oc_prop_san
+  
+  full_oc_prop_mkt %>% 
+    full_join(oc_prop_san, by='DAT_REGISTRO') %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
+    mutate(VOL_OC = VOL_OC.x - VOL_OC.y) %>% 
+    select(DAT_REGISTRO,VOL_OC) %>% 
+    collect() -> oc_prop_mkt
+  
+  cdb_mkt %>% 
+    full_join(oc_prop_mkt, by='DAT_REGISTRO') %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) %>% 
+    mutate(VOL = VOL_CDB + VOL_OC) %>% 
+    select(DAT_REGISTRO,VOL, VOL_CDB, VOL_OC) %>% 
+    collect() -> tbl_mkt
+  
+  bo_santander %>% 
+    filter(DESC_SUB_PROD %in% c("CDB DI", "CDB DI CORPORATE"), 
+           INST == "Cliente",
+           DT_CONT >= '2017-05-02') %>% 
+    group_by(DT_CONT) %>% 
+    summarise(DAT_REGISTRO = DT_CONT,VOL = sum(VOL)) %>% 
+    select(DAT_REGISTRO, VOL) %>% 
+    collect() -> san_bo
+  
+  san_bo %>% 
+    full_join(tbl_mkt, by='DAT_REGISTRO') %>% 
+    mutate(Share = VOL.x / (VOL.y + VOL.x)) %>% 
+    collect() -> hist_share
+  
+  return(hist_share)
+}
+make_mktmkt_plot <- function(tbl_mercado, tbl_santander, bo_santander){
+  tbl_mercado %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           EMISSOR == "Mercado",
+           DETENTOR == "Mercado",
+           DAT_REGISTRO >= '2017-05-02') %>% 
+    collect() %>%
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM")) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(DAT_REGISTRO) %>% 
+    summarise(Vol_mkt = sum(VAL_FINANCEIRO_TOTAL), Tx_mkt = sum(taxa)) -> cdb_mercado_m2
+  
+  tbl_santander %>% 
+    filter(Peer == "Grandes bancos de Varejo",
+           INDICE == "DI",
+           EMISSOR == "Mercado",
+           DETENTOR == "Mercado",
+           DAT_REGISTRO >= '2017-05-02') %>% 
+    collect() %>% 
+    unite(COD,CONDICAO_RESGATE,CONDICAO_ESPECIFICA,sep="") %>% 
+    filter(COD %in% c("CONDICAO A MERCADONAO","TEM CONDICAOSIM")) %>% 
+    mutate(taxa = TAXA_MEDIA * VAL_FINANCEIRO_TOTAL) %>% 
+    group_by(DAT_REGISTRO) %>% 
+    summarise(Vol_san = sum(VAL_FINANCEIRO_TOTAL), Tx_san = sum(taxa)) -> cdb_santander_m2
+  
+  cdb_mercado_m2 %>% 
+    full_join(cdb_santander_m2, by = 'DAT_REGISTRO') %>% 
+    mutate(VOL = Vol_mkt - Vol_san, Tx = (Tx_mkt - Tx_san)/(Vol_mkt - Vol_san)) %>% 
+    select(DAT_REGISTRO,VOL,Tx) -> cdb_mkt
+  
+  bo_santander %>% 
+    filter(DESC_SUB_PROD %in% c("CDB DI", "CDB DI CORPORATE"), 
+           INST == "Institucionais",
+           DT_CONT >= '2017-05-02') %>%
+    mutate(Tx = VOL * Per_index) %>% 
+    group_by(DT_CONT) %>%
+    summarise(DAT_REGISTRO = DT_CONT,VOL = sum(VOL), Tx = sum(Tx)) %>% 
+    mutate(Taxa = Tx/VOl) %>% 
+    select(DAT_REGISTRO, VOL, Taxa) %>% 
+    collect() -> san_cdb_mktmkt
+  
+  cdb_mkt %>% 
+    full_join(san_cdb_mktmkt, by = 'DAT_REGISTRO') %>% 
+    mutate(share = (VOL.y / (VOL.x + VOL.y)), delta = Taxa - Tx) %>% 
+    select(DAT_REGISTRO,VOL.y,Taxa,share,delta) %>% 
+    collect() %>% 
+    mutate_all(funs(replace(.,is.na(.),0))) -> mktmkt_plot
+  
+  return(mktmkt_plot)
+}
+
+# ---- Home table and Time Series ----
+hist_share <- share_san(tbl_mercado_cdb = tbl_CDB_mercado,
+                        tbl_santander_cdb = tbl_CDB_santander,
+                        tbl_mercado_oc = tbl_oc_mercado,
+                        tbl_santander_oc = tbl_oc_santander,
+                        bo_santander = tbl_bo_santander)
+ts_santander <- xts::xts(hist_share$VOL.x/1000000,order.by = lubridate::ymd(hist_share$DAT_REGISTRO))
+ts_mercado <- xts::xts(hist_share$VOL.y/1000000,order.by = lubridate::ymd(hist_share$DAT_REGISTRO))
+ts_share <- xts::xts(hist_share$Share,order.by = lubridate::ymd(hist_share$DAT_REGISTRO))
 
 # ---- Create Mkt Tables ----
 oc_mkt_terc <-  oc_press_terc(day,tbl_oc_mercado,tbl_oc_santander)
@@ -219,24 +369,123 @@ cdb_mktmkt %>%
 Home {data-icon="glyphicon glyphicon-home"}
 =====================================
 
-############################################################
-####### Trabalhar as estatisticas e share de mercado #######
-############################################################
+Row {data-height=400}
+-----------------------------------------------------------------------
 
-OC Lastro Terceiros {data-navmenu="OC"}
+### Report de Produção
+
+<font size="3">Os dados abaixo refletem volumes e taxas de D-1 para CDB e Compromissadas (Ex-Lastros de terceiros)</font>
+
+<font size="3">**São consideradas apenas boletas acima de R$ 10MM e indexadas ao DI**</font>
+
+<font size="2">Fonte de dados:</font>
+
+<font size="2">Santander: Sistema BP | Peer Group (BB, Bradesco, Caixa, Itaú) :  Report B3</font>
+ 
+Row
+-----------------------------------------------------------------------
+
+### Share (Santander x Peer)
+
+```{r share_ValueBox}
+hist_share %>% 
+  filter(DAT_REGISTRO == day) %>% 
+  select(Share) %>% 
+  magrittr::use_series(Share) -> share_santander
+valueBox(scales::percent(share_santander), icon = "glyphicon glyphicon-equalizer", color = "danger")
+```
+
+### Volume Santander CDB
+
+```{r vol_ValueBox}
+hist_share %>% 
+  filter(DAT_REGISTRO == day) %>% 
+  select(VOL.x) %>% 
+  magrittr::use_series(VOL.x) -> vol_santander
+valueBox(paste0("R$",round(vol_santander/1000000,digits = 2)," MM"), icon = "glyphicon glyphicon-piggy-bank", color = "danger")
+  
+```
+
+### Volume CDB Peer
+
+```{r CDBMkt_valueBox}
+hist_share %>% 
+  filter(DAT_REGISTRO == day) %>% 
+  select(VOL_CDB) %>% 
+  magrittr::use_series(VOL_CDB) -> vol_cdb_mkt
+valueBox(paste0("R$",round(vol_cdb_mkt/1000000,digits = 2)," MM"), icon = "glyphicon glyphicon-usd", color = "info")
+```
+
+### Volume OC Peer (last.Prop.)
+
+```{r OCProp_ValueBox}
+hist_share %>% 
+  filter(DAT_REGISTRO == day) %>% 
+  select(VOL_OC) %>% 
+  magrittr::use_series(VOL_OC) -> vol_santander
+valueBox(paste0("R$",round(vol_santander/1000000,digits = 2)," MM"), icon = "glyphicon glyphicon-usd", color = "info")
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Share (CDB + OC Lastro Prop.)
+
+```{r home_dygraph}
+dygraph(ts_share, main = "Share Santander vs. Peer (%)", group = "home") %>% 
+  dySeries("V1",label = "Share", color = "red")
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Vol Santander (CDB)
+
+```{r}
+dygraph(ts_santander, main="Vol.Santander (R$MM)",group="home") %>% 
+  dySeries("V1", label = "Vol", color = "red")
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Vol Mercado (CDB + OC Lastro Proprio)
+
+```{r}
+dygraph(ts_mercado, main = "Vol. Market (R$MM)", group="home") %>% 
+  dyRangeSelector(dateWindow = c(paste(Sys.Date()-30),day))
+```
+
+
+OC Lastro Terceiros {data-navmenu="Op Compromissadas"}
 =====================================  
 
 Row {data-height=750}
 -----------------------------------------------------------------------
 
-### OC | Evo. - Share vs Peers (BRL MM)
+### Grafico Superior: Produção Santander | Grafico Inferior: San Vs. Peer
 
 ```{r OC_Highcharter}
-highchart(type="stock") %>% 
-  hc_add_series(ts_San_Share, name = "Share", color = "red") %>% 
-  hc_add_series(ts_delta, type = "column", name = "Delta", color = "gray") %>% 
-  hc_rangeSelector(selected = 0) %>% 
-  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+tbl_bo_santander %>% 
+  filter(DESC_SUB_PROD == "COMPROMISSADA DI",
+         DT_CONT >= '2017-05-02') %>%
+  mutate(Tx = VOL * Per_index) %>% 
+  group_by(DT_CONT) %>% 
+  summarise(DAT_REGISTRO = DT_CONT,VOL = sum(VOL), Tx = sum(Tx)) %>% 
+  mutate(Taxa = Tx/VOl) %>% 
+  select(DAT_REGISTRO,VOL,Taxa) %>% 
+  collect() -> san_oc
+
+ts_oc_vol <- xts::xts(round(san_oc$VOL/1000000, digits = 2), order.by = lubridate::ymd(san_oc$DAT_REGISTRO))
+ts_oc_tx <-  xts::xts(round(san_oc$Taxa, digits = 2), order.by = lubridate::ymd(san_oc$DAT_REGISTRO))
+
+highchart(type = "stock") %>% 
+  hc_yAxis_multiples(create_yaxis(4,height = c(2,1,2,1))) %>%
+  hc_add_series(ts_oc_tx, yAxis=0, name = "Taxa SAN", color = "red", tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_oc_vol, yAxis=1, name = "Vol. SAN", color = hex_to_rgba("gray",0.7), type = "column", tooltip = list(valueSuffix = 'MM')) %>% 
+  hc_add_series(ts_delta, yAxis=2, name = "Delta (Tax)", color = hex_to_rgba('#E59D27',0.7),tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_San_Share, yAxis=3, name = "Share (Vol)", type = "column", color = hex_to_rgba('#1BB3BC',0.6),tooltip = list(valueSuffix = '%')) %>% 
+  hc_rangeSelector(selected = 0)
 ```
 
 Row
@@ -302,7 +551,7 @@ tbl_press %>%
   DT::formatStyle(c('Tx_med_SAN','Tx_med_mkt', 'DeltaSan'),fontWeight = 'bold')
 ```
 
-OC Lastro Próprio {data-navmenu="OC"}
+OC Lastro Próprio {data-navmenu="Op Compromissadas"}
 =====================================  
 
 Row {data-height=750}
@@ -315,7 +564,8 @@ filter(TICKET %in% c("(H) De 10 a 20 milhões","(I) De 20 a 50 milhões", "(J) D
        ATIVO == 'DEB',
        INDEXADOR == 'DI',
        TIPO_ATIVO == 'Leasing',
-       PEER == 'Grandes bancos de Varejo') %>%
+       PEER == 'Grandes bancos de Varejo',
+       DAT_REGISTRO >= '2017-05-02') %>%
   mutate(VOL = VAL_FINANCEIRO, Tx = VAL_FINANCEIRO * TAXA_MEDIA) %>% 
   group_by(DAT_REGISTRO) %>% 
   summarise(VOL = sum(VOL)/1000000, Tx = sum(Tx)/sum(VOL)) %>% 
@@ -327,7 +577,7 @@ ts_mkt_tx <- xts::xts(round(mkt_oc_plot$Tx, digits = 2),order.by = lubridate::ym
 highchart(type="stock") %>% 
   hc_yAxis_multiples(create_yaxis(2,height = c(1,1))) %>% 
   hc_add_series(ts_mkt_tx, yAxis = 0, name = "Taxa", color = "red", tooltip = list(valueSuffix = '%')) %>% 
-  hc_add_series(ts_mkt_vol, yAxis = 1, type = "column", name = "Delta", color = 'gray') %>% 
+  hc_add_series(ts_mkt_vol, yAxis = 1, type = "column", name = "Volume", color = 'gray') %>% 
   hc_rangeSelector(selected = 0)
 ```
 
@@ -368,17 +618,33 @@ oc_mkt_prop %>%
 CDB Mercado-Cliente {data-navmenu="CDB"}
 =====================================
 
-Row {data-height=650}
+Row {data-height=750}
 -----------------------------------------------------------------------
 
-### CDB (Market - Client) | Share vs Peers (BRL MM)
+### Grafico Superior: Produção Santander | Grafico Inferior: San Vs. Peer
 
-```{r CBDMC_Highcharter}
-highchart(type="stock") %>% 
-  hc_add_series(ts_San_Share_cdb, name = "Share", color = "red") %>% 
-  hc_add_series(ts_delta_cdb, type = "column", name = "Delta", color = "gray") %>% 
-  hc_rangeSelector(selected = 0) %>% 
-  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+```{r}
+tbl_bo_santander %>% 
+  filter(DESC_SUB_PROD %in% c("CDB DI", "CDB DI CORPORATE"), 
+         INST == "Cliente",
+         DT_CONT>='2017-05-02') %>%
+  mutate(Tx = VOL * Per_index) %>% 
+  group_by(DT_CONT) %>%
+  summarise(DAT_REGISTRO = DT_CONT,VOL = sum(VOL), Tx = sum(Tx)) %>% 
+  mutate(Taxa = Tx/VOl) %>% 
+  select(DAT_REGISTRO, VOL, Taxa) %>% 
+  collect() -> san_cdb_mkt
+
+ts_cdb_vol <- xts::xts(round(san_cdb_mkt$VOL/1000000, digits = 2), order.by = lubridate::ymd(san_cdb_mkt$DAT_REGISTRO))
+ts_cdb_tx <-  xts::xts(round(san_cdb_mkt$Taxa, digits = 2), order.by = lubridate::ymd(san_cdb_mkt$DAT_REGISTRO))
+
+highchart(type = "stock") %>% 
+  hc_yAxis_multiples(create_yaxis(4,height = c(2,1,2,1))) %>%
+  hc_add_series(ts_cdb_tx, yAxis=0, name = "Taxa SAN", color = "red", tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_cdb_vol, yAxis=1, name = "Vol. SAN", color = hex_to_rgba("gray",0.7), type = "column", tooltip = list(valueSuffix = 'MM')) %>% 
+  hc_add_series(ts_delta_cdb, yAxis=2, name = "Delta (Tax)", color = hex_to_rgba('#E59D27',0.7),tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_San_Share_cdb, yAxis=3, name = "Share (Vol)", type = "column", color = hex_to_rgba('#1BB3BC',0.6),tooltip = list(valueSuffix = '%')) %>% 
+  hc_rangeSelector(selected = 0)
 ```
 
 Row
@@ -450,14 +716,22 @@ CDB Mercado-Mercado {data-navmenu="CDB"}
 Row {data-height=650}
 -----------------------------------------------------------------------
 
-### CDB (Market - Client) | Share vs Peers (BRL MM)
+### Grafico Superior: Produção Santander | Grafico Inferior: San Vs. Peer
 
-```{r CDBMM_Highcharter}
-highchart(type="stock") %>% 
-  hc_add_series(ts_San_Share_cdb2, name = "Share", color = "red") %>% 
-  hc_add_series(ts_delta_cdb2, type = "column", name = "Delta", color = "gray") %>% 
-  hc_rangeSelector(selected = 0) %>% 
-  hc_tooltip(useHTML=TRUE,pointFormat = paste0("<span style=\"color:{point.color}\">\u25CF</span>", "{series.name}: <b>{point.y:.2f}%</b><br/>"))
+```{r}
+san_cdb_mktmkt <- make_mktmkt_plot(tbl_mercado = tbl_CDB_mercado, tbl_santander =tbl_CDB_santander, bo_santander = tbl_bo_santander)
+
+ts_cdb2_vol <- xts::xts(round(san_cdb_mktmkt$VOL.y/1000000, digits = 2), order.by = lubridate::ymd(san_cdb_mktmkt$DAT_REGISTRO))
+ts_cdb2_tx <-  xts::xts(round(san_cdb_mktmkt$Taxa, digits = 2), order.by = lubridate::ymd(san_cdb_mktmkt$DAT_REGISTRO))
+ts_delta_cdb2 <- xts::xts(round(san_cdb_mktmkt$delta, digits = 2), order.by = lubridate::ymd(san_cdb_mktmkt$DAT_REGISTRO))
+ts_San_Share_cdb2 <- xts::xts(round(san_cdb_mktmkt$share, digits = 2), order.by = lubridate::ymd(san_cdb_mktmkt$DAT_REGISTRO))
+
+highchart(type = "stock") %>% 
+  hc_yAxis_multiples(create_yaxis(4,height = c(2,1,2,1))) %>%
+  hc_add_series(ts_cdb2_tx, yAxis=0, name = "Taxa SAN", color = "red", tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_cdb2_vol, yAxis=1, name = "Vol. SAN", color = hex_to_rgba("gray",0.7), type = "column", tooltip = list(valueSuffix = 'MM')) %>% 
+  hc_add_series(ts_delta_cdb2, yAxis=2, name = "Delta (Tax)", color = hex_to_rgba('#E59D27',0.7),tooltip = list(valueSuffix = '%')) %>% 
+  hc_add_series(ts_San_Share_cdb2, yAxis=3, name = "Share (Vol)", type = "column", color = hex_to_rgba('#1BB3BC',0.6),tooltip = list(valueSuffix = '%'))
 ```
 
 Row
@@ -526,5 +800,12 @@ tbl_press_cdb_mktmkt %>%
 info {.hidden}
 =====================================
 
-Developer - t684098
-Tsy.Evo - v1.0
+S&MI - Jul/17
+
+Developer:
+
+Sylvio Campos Neto - t684098
+
++55 11 3553 - 7468
+
+Tsy.Evo - v1.1.2
